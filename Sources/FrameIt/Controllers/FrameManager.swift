@@ -52,13 +52,11 @@ class FrameManager: GlassFrameViewDelegate {
             ?? NSScreen.main
             ?? NSScreen.screens.first!
 
-        // Place a default 250×180 frame in the center of that screen
-        let w: CGFloat = 250
-        let h: CGFloat = 180
-        let x = screen.frame.midX - w / 2
-        let y = screen.frame.midY - h / 2
+        // Create a 2×2 grid-aligned frame centered on screen
+        let grid = DesktopGrid(screen: screen)
+        let rect = grid.defaultFrameRect()
 
-        let group = FrameGroup(title: "Untitled", rect: CGRect(x: x, y: y, width: w, height: h))
+        let group = FrameGroup(title: "Untitled", rect: rect)
         store.add(group)
         createWindow(for: group)
 

@@ -146,6 +146,9 @@ class GlassFrameView: FirstMouseView {
         buttonsHosting = nil
     }
 
+    // Grid snapping
+    let grid = DesktopGrid()
+
     // MARK: - Mouse Handling
 
     override func mouseDown(with event: NSEvent) {
@@ -179,9 +182,21 @@ class GlassFrameView: FirstMouseView {
     override func mouseUp(with event: NSEvent) {
         guard isDraggingOrResizing else { return }
         isDraggingOrResizing = false
+        let wasResizing = resizeEdge != .none
         resizeEdge = .none
         guard let window = window else { return }
-        delegate?.glassFrameDidMove(self, to: window.frame)
+
+        // Snap to grid with smooth animation
+        let currentFrame = window.frame
+        let snappedFrame = grid.snapRect(currentFrame)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(snappedFrame, display: true)
+        }
+
+        delegate?.glassFrameDidMove(self, to: snappedFrame)
     }
 
     // MARK: - Context Menu
