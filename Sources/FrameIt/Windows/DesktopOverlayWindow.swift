@@ -5,6 +5,11 @@ import Cocoa
 
 class DesktopOverlayWindow: NSWindow {
 
+    /// Desktop level — frames visible behind icons, passthrough clicks
+    private static let desktopLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+    /// Edit level — overlay above everything to receive mouse events
+    private static let editLevel = NSWindow.Level.floating
+
     init() {
         // Span the full main screen
         let screenFrame = NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
@@ -21,8 +26,8 @@ class DesktopOverlayWindow: NSWindow {
         backgroundColor = .clear
         hasShadow = false
 
-        // Sit just above the desktop wallpaper but below desktop icons
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+        // Start at desktop level
+        level = Self.desktopLevel
 
         // Appear on all Spaces and stay fixed
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -40,6 +45,23 @@ class DesktopOverlayWindow: NSWindow {
     // Allow the window to become key when we enable editing
     override var canBecomeKey: Bool { !ignoresMouseEvents }
     override var canBecomeMain: Bool { false }
+
+    // MARK: - Level Switching
+
+    /// Raise to floating level so overlay receives mouse events for drawing/editing
+    func enterEditLevel() {
+        ignoresMouseEvents = false
+        level = Self.editLevel
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Lower back to desktop level so icons sit above, clicks pass through
+    func enterDesktopLevel() {
+        ignoresMouseEvents = true
+        level = Self.desktopLevel
+        orderFront(nil)
+    }
 
     // MARK: - Screen Change Handling
 

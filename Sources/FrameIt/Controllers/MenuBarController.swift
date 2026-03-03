@@ -3,7 +3,7 @@ import Cocoa
 // MARK: - MenuBarController
 // NSStatusItem-based menu bar interface for the app.
 
-class MenuBarController {
+class MenuBarController: NSObject {
 
     private var statusItem: NSStatusItem!
     private let overlayWindow: DesktopOverlayWindow
@@ -16,6 +16,7 @@ class MenuBarController {
     init(overlayWindow: DesktopOverlayWindow, overlayView: DesktopOverlayView) {
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
+        super.init()
         setupStatusItem()
 
         NotificationCenter.default.addObserver(
@@ -63,11 +64,10 @@ class MenuBarController {
     // MARK: - Actions
 
     @objc private func newFrame() {
-        // Enter draw mode
-        overlayWindow.ignoresMouseEvents = false
+        // Enter draw mode — raise window to floating so it receives clicks
         overlayView.isEditing = true
         overlayView.isDrawing = true
-        overlayWindow.makeKeyAndOrderFront(nil)
+        overlayWindow.enterEditLevel()
         newFrameMenuItem.state = .on
 
         // Change cursor to crosshair
@@ -78,10 +78,11 @@ class MenuBarController {
         let entering = !overlayView.isEditing
 
         overlayView.isEditing = entering
-        overlayWindow.ignoresMouseEvents = !entering
 
         if entering {
-            overlayWindow.makeKeyAndOrderFront(nil)
+            overlayWindow.enterEditLevel()
+        } else {
+            overlayWindow.enterDesktopLevel()
         }
 
         editMenuItem.state = entering ? .on : .off
@@ -90,7 +91,7 @@ class MenuBarController {
 
     @objc private func lockFrames() {
         overlayView.isEditing = false
-        overlayWindow.ignoresMouseEvents = true
+        overlayWindow.enterDesktopLevel()
         editMenuItem.state = .off
         lockMenuItem.state = .on
         NSCursor.pop()
