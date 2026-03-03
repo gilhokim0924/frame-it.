@@ -12,6 +12,7 @@ class FrameWindow: NSPanel {
     private static let desktopLevel = NSWindow.Level(
         rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1
     )
+
     /// Edit level — just above desktop icons so we can interact
     private static let editLevel = NSWindow.Level(
         rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1

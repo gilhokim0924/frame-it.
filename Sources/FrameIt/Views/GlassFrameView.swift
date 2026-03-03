@@ -1,157 +1,121 @@
 import SwiftUI
 import Cocoa
 
-// MARK: - Accent Colors for Frames
-
-struct FrameColors {
-    static let palettes: [(color: Color, name: String)] = [
-        (.white.opacity(0.15), "Clear"),
-        (.blue, "Blue"),
-        (.purple, "Purple"),
-        (.pink, "Pink"),
-        (.orange, "Orange"),
-        (.green, "Green"),
-        (.teal, "Teal"),
-    ]
-
-    static func color(for index: Int) -> Color {
-        palettes[index % palettes.count].color
-    }
-
-    static func name(for index: Int) -> String {
-        palettes[index % palettes.count].name
-    }
-}
-
-// MARK: - SwiftUI Liquid Glass Frame Content
-
-struct LiquidGlassFrameContent: View {
-    let title: String
-    let colorIndex: Int
-    let isEditing: Bool
-    var onDelete: () -> Void
-    var onDone: () -> Void
-
-    var body: some View {
-        ZStack {
-            // Main Liquid Glass background
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.clear)
-                .glassEffect(.regular.tint(FrameColors.color(for: colorIndex)),
-                             in: .rect(cornerRadius: 20))
-
-            // Content overlay
-            VStack(alignment: .leading, spacing: 0) {
-                // Title bar area
-                HStack {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    // Edit-mode buttons
-                    if isEditing {
-                        HStack(spacing: 6) {
-                            // Delete button (glass circle)
-                            Button(action: onDelete) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.red)
-                                    .frame(width: 24, height: 24)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.tint(.red.opacity(0.3)),
-                                         in: .circle)
-
-                            // Done button (glass circle)
-                            Button(action: onDone) {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.green)
-                                    .frame(width: 24, height: 24)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.tint(.green.opacity(0.3)),
-                                         in: .circle)
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-
-                Spacer()
-            }
-
-            // Edit mode dashed border
-            if isEditing {
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-        }
-    }
-}
-
-// MARK: - GlassFrameView (AppKit wrapper)
-// Content view for a FrameWindow. Wraps SwiftUI Liquid Glass content
-// and handles drag-to-move / edge-resize.
+// MARK: - GlassFrameView
+// Uses NSGlassEffectView (Apple's official Liquid Glass API for AppKit)
+// with SwiftUI buttons overlaid via NSHostingView for edit controls.
 
 class GlassFrameView: FirstMouseView {
 
     var frameGroup: FrameGroup {
-        didSet { updateSwiftUIContent() }
+        didSet { updateContent() }
     }
 
     weak var delegate: GlassFrameViewDelegate?
 
     var isEditMode = false {
-        didSet { updateSwiftUIContent() }
+        didSet { updateContent() }
     }
 
-    // SwiftUI hosting
-    private var hostingView: NSHostingView<LiquidGlassFrameContent>!
+    // Subviews
+    private let glassView = NSGlassEffectView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var buttonsHosting: NSHostingView<EditButtonsView>?
 
     // Interaction state
     private var initialMouseLocation: NSPoint = .zero
     private var initialWindowFrame: CGRect = .zero
     private var resizeEdge: ResizeEdge = .none
     private var isDraggingOrResizing = false
-
     private let handleSize: CGFloat = 10
+
+    // Edit mode border
+    private let borderLayer = CAShapeLayer()
 
     // MARK: - Init
 
     init(frameGroup: FrameGroup) {
         self.frameGroup = frameGroup
         super.init(frame: NSRect(origin: .zero, size: frameGroup.rect.cgRect.size))
-        setupHostingView()
+        wantsLayer = true
+        layer?.backgroundColor = .clear
+        setupGlassView()
+        setupTitleLabel()
+        setupBorderLayer()
+        updateContent()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // MARK: - SwiftUI Hosting
+    // MARK: - Setup
 
-    private func setupHostingView() {
-        let content = makeContent()
-        hostingView = NSHostingView(rootView: content)
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hostingView)
+    private func setupGlassView() {
+        glassView.translatesAutoresizingMaskIntoConstraints = false
+        glassView.cornerRadius = 20
+
+        addSubview(glassView)
 
         NSLayoutConstraint.activate([
-            hostingView.topAnchor.constraint(equalTo: topAnchor),
-            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            glassView.topAnchor.constraint(equalTo: topAnchor),
+            glassView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glassView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glassView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
-    private func makeContent() -> LiquidGlassFrameContent {
-        LiquidGlassFrameContent(
-            title: frameGroup.title,
-            colorIndex: frameGroup.colorIndex,
-            isEditing: isEditMode,
+    private func setupTitleLabel() {
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.isEditable = false
+        titleLabel.isBezeled = false
+        titleLabel.drawsBackground = false
+        titleLabel.backgroundColor = .clear
+
+        glassView.addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: glassView.topAnchor, constant: 10),
+            titleLabel.leadingAnchor.constraint(equalTo: glassView.leadingAnchor, constant: 12),
+        ])
+    }
+
+    private func setupBorderLayer() {
+        borderLayer.fillColor = nil
+        borderLayer.strokeColor = NSColor.white.withAlphaComponent(0.4).cgColor
+        borderLayer.lineWidth = 1.5
+        borderLayer.lineDashPattern = [6, 4]
+        borderLayer.isHidden = true
+        layer?.addSublayer(borderLayer)
+    }
+
+    override func layout() {
+        super.layout()
+        borderLayer.frame = bounds
+        let path = CGPath(roundedRect: bounds.insetBy(dx: 1, dy: 1),
+                          cornerWidth: 20, cornerHeight: 20, transform: nil)
+        borderLayer.path = path
+    }
+
+    // MARK: - Content Update
+
+    private func updateContent() {
+        titleLabel.stringValue = frameGroup.title
+        borderLayer.isHidden = !isEditMode
+
+        if isEditMode {
+            showEditButtons()
+        } else {
+            hideEditButtons()
+        }
+    }
+
+    private func showEditButtons() {
+        if buttonsHosting != nil { return }
+
+        let view = EditButtonsView(
             onDelete: { [weak self] in
                 guard let self = self else { return }
                 self.delegate?.glassFrameDidRequestDelete(self)
@@ -160,21 +124,35 @@ class GlassFrameView: FirstMouseView {
                 NotificationCenter.default.post(name: .frameDoneEditing, object: nil)
             }
         )
+
+        let hosting = NSHostingView(rootView: view)
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        hosting.sceneBridgingOptions = []
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = .clear
+
+        glassView.addSubview(hosting)
+
+        NSLayoutConstraint.activate([
+            hosting.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            hosting.trailingAnchor.constraint(equalTo: glassView.trailingAnchor, constant: -10),
+        ])
+
+        buttonsHosting = hosting
     }
 
-    private func updateSwiftUIContent() {
-        hostingView?.rootView = makeContent()
+    private func hideEditButtons() {
+        buttonsHosting?.removeFromSuperview()
+        buttonsHosting = nil
     }
 
-    // MARK: - Mouse Handling (moves/resizes the parent WINDOW)
+    // MARK: - Mouse Handling
 
     override func mouseDown(with event: NSEvent) {
-        // Double-click to rename
         if event.clickCount == 2 {
             renameAction()
             return
         }
-
         guard let window = window else { return }
         initialMouseLocation = NSEvent.mouseLocation
         initialWindowFrame = window.frame
@@ -189,13 +167,12 @@ class GlassFrameView: FirstMouseView {
         let dy = currentMouse.y - initialMouseLocation.y
 
         if resizeEdge != .none {
-            let newFrame = computeResize(dx: dx, dy: dy)
-            window.setFrame(newFrame, display: true)
+            window.setFrame(computeResize(dx: dx, dy: dy), display: true)
         } else {
-            var newOrigin = initialWindowFrame.origin
-            newOrigin.x += dx
-            newOrigin.y += dy
-            window.setFrameOrigin(newOrigin)
+            var origin = initialWindowFrame.origin
+            origin.x += dx
+            origin.y += dy
+            window.setFrameOrigin(origin)
         }
     }
 
@@ -216,18 +193,6 @@ class GlassFrameView: FirstMouseView {
         renameItem.target = self
         menu.addItem(renameItem)
 
-        let colorMenu = NSMenu()
-        for (i, palette) in FrameColors.palettes.enumerated() {
-            let item = NSMenuItem(title: palette.name, action: #selector(changeColorAction(_:)), keyEquivalent: "")
-            item.tag = i
-            item.target = self
-            if i == frameGroup.colorIndex { item.state = .on }
-            colorMenu.addItem(item)
-        }
-        let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
-        colorItem.submenu = colorMenu
-        menu.addItem(colorItem)
-
         menu.addItem(.separator())
 
         let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteAction), keyEquivalent: "")
@@ -238,7 +203,6 @@ class GlassFrameView: FirstMouseView {
     }
 
     @objc private func renameAction() {
-        // Show a simple rename alert
         let alert = NSAlert()
         alert.messageText = "Rename Frame"
         alert.addButton(withTitle: "OK")
@@ -250,15 +214,9 @@ class GlassFrameView: FirstMouseView {
 
         if alert.runModal() == .alertFirstButtonReturn {
             frameGroup.title = textField.stringValue
-            updateSwiftUIContent()
+            updateContent()
             delegate?.glassFrameDidUpdate(self)
         }
-    }
-
-    @objc private func changeColorAction(_ sender: NSMenuItem) {
-        frameGroup.colorIndex = sender.tag
-        updateSwiftUIContent()
-        delegate?.glassFrameDidUpdate(self)
     }
 
     @objc private func deleteAction() {
@@ -274,7 +232,6 @@ class GlassFrameView: FirstMouseView {
     private func detectEdge(at point: NSPoint) -> ResizeEdge {
         let h = handleSize
         let b = bounds
-
         let onLeft   = point.x < h
         let onRight  = point.x > b.width - h
         let onBottom = point.y < h
@@ -299,34 +256,63 @@ class GlassFrameView: FirstMouseView {
         case .right:
             r.size.width = max(minSize, initialWindowFrame.width + dx)
         case .left:
-            r.origin.x = initialWindowFrame.origin.x + dx
-            r.size.width = max(minSize, initialWindowFrame.width - dx)
+            r.origin.x += dx; r.size.width = max(minSize, initialWindowFrame.width - dx)
         case .top:
             r.size.height = max(minSize, initialWindowFrame.height + dy)
         case .bottom:
-            r.origin.y = initialWindowFrame.origin.y + dy
-            r.size.height = max(minSize, initialWindowFrame.height - dy)
+            r.origin.y += dy; r.size.height = max(minSize, initialWindowFrame.height - dy)
         case .topRight:
             r.size.width = max(minSize, initialWindowFrame.width + dx)
             r.size.height = max(minSize, initialWindowFrame.height + dy)
         case .topLeft:
-            r.origin.x = initialWindowFrame.origin.x + dx
-            r.size.width = max(minSize, initialWindowFrame.width - dx)
+            r.origin.x += dx; r.size.width = max(minSize, initialWindowFrame.width - dx)
             r.size.height = max(minSize, initialWindowFrame.height + dy)
         case .bottomRight:
             r.size.width = max(minSize, initialWindowFrame.width + dx)
-            r.origin.y = initialWindowFrame.origin.y + dy
-            r.size.height = max(minSize, initialWindowFrame.height - dy)
+            r.origin.y += dy; r.size.height = max(minSize, initialWindowFrame.height - dy)
         case .bottomLeft:
-            r.origin.x = initialWindowFrame.origin.x + dx
-            r.size.width = max(minSize, initialWindowFrame.width - dx)
-            r.origin.y = initialWindowFrame.origin.y + dy
-            r.size.height = max(minSize, initialWindowFrame.height - dy)
-        case .none:
-            break
+            r.origin.x += dx; r.size.width = max(minSize, initialWindowFrame.width - dx)
+            r.origin.y += dy; r.size.height = max(minSize, initialWindowFrame.height - dy)
+        case .none: break
         }
-
         return r
+    }
+}
+
+// MARK: - Edit Buttons (SwiftUI with Liquid Glass circles)
+
+struct EditButtonsView: View {
+    var onDelete: () -> Void
+    var onDone: () -> Void
+    @State private var deleteHovered = false
+    @State private var doneHovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .brightness(deleteHovered ? 0.15 : 0)
+            .animation(.easeInOut(duration: 0.15), value: deleteHovered)
+            .onHover { deleteHovered = $0 }
+
+            Button(action: onDone) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .brightness(doneHovered ? 0.15 : 0)
+            .animation(.easeInOut(duration: 0.15), value: doneHovered)
+            .onHover { doneHovered = $0 }
+        }
     }
 }
 
