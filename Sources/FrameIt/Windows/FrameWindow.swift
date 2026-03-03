@@ -7,6 +7,17 @@ import Cocoa
 class FrameWindow: NSPanel {
 
     let frameId: UUID
+
+    /// Desktop level — frames visible behind icons, passthrough clicks
+    private static let desktopLevel = NSWindow.Level(
+        rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1
+    )
+    /// Edit level — same as desktop icons so frames can receive events
+    /// without covering other app windows
+    private static let editLevel = NSWindow.Level(
+        rawValue: Int(CGWindowLevelForKey(.desktopIconWindow))
+    )
+
     var isEditMode = false {
         didSet { updateEditState() }
     }
@@ -27,7 +38,7 @@ class FrameWindow: NSPanel {
         hasShadow = false
 
         // Sit just above the desktop wallpaper
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+        level = Self.desktopLevel
 
         // Appear on all Spaces and stay put
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -51,12 +62,10 @@ class FrameWindow: NSPanel {
 
     private func updateEditState() {
         if isEditMode {
-            // Raise above everything so we can interact with the frame
-            level = .floating
+            level = Self.editLevel
             ignoresMouseEvents = false
         } else {
-            // Lower back to desktop level, passthrough
-            level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+            level = Self.desktopLevel
             ignoresMouseEvents = true
         }
     }

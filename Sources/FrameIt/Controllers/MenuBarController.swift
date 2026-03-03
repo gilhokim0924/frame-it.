@@ -16,6 +16,12 @@ class MenuBarController: NSObject {
         self.frameManager = frameManager
         super.init()
         setupStatusItem()
+
+        // Listen for edit mode changes from ✓ button or new frame creation
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(editModeChanged),
+            name: .frameEditModeChanged, object: nil
+        )
     }
 
     private func setupStatusItem() {
@@ -57,21 +63,26 @@ class MenuBarController: NSObject {
 
     @objc private func newFrame() {
         frameManager.addNewFrame()
-        editMenuItem.state = .on
-        lockMenuItem.state = .off
+        syncMenuState()
     }
 
     @objc private func toggleEdit() {
-        let entering = !frameManager.isEditing
-        frameManager.isEditing = entering
-        editMenuItem.state = entering ? .on : .off
-        lockMenuItem.state = .off
+        frameManager.isEditing = !frameManager.isEditing
+        syncMenuState()
     }
 
     @objc private func lockFrames() {
         frameManager.isEditing = false
-        editMenuItem.state = .off
-        lockMenuItem.state = .on
+        syncMenuState()
+    }
+
+    @objc private func editModeChanged() {
+        syncMenuState()
+    }
+
+    private func syncMenuState() {
+        editMenuItem.state = frameManager.isEditing ? .on : .off
+        lockMenuItem.state = frameManager.isEditing ? .off : .on
     }
 
     @objc private func quit() {

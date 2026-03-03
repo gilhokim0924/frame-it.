@@ -1,17 +1,21 @@
 import Cocoa
 
 // MARK: - FrameManager
-// Manages all FrameWindows. Replaces the old DesktopOverlayWindow/View approach.
+// Manages all FrameWindows. Each frame is its own small NSPanel.
 
 class FrameManager: GlassFrameViewDelegate {
 
     let store: FrameStore
     private var windows: [UUID: FrameWindow] = [:]
+    private var glassViews: [UUID: GlassFrameView] = [:]
 
     var isEditing = false {
         didSet {
             for (_, window) in windows {
                 window.isEditMode = isEditing
+            }
+            for (_, view) in glassViews {
+                view.isEditMode = isEditing
             }
         }
     }
@@ -19,6 +23,16 @@ class FrameManager: GlassFrameViewDelegate {
     init(store: FrameStore) {
         self.store = store
         loadFrames()
+
+        // Listen for "done editing" from the ✓ button
+        NotificationCenter.default.addObserver(
+            forName: .frameDoneEditing,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.isEditing = false
+            // Also notify the menu bar to update its state
+            NotificationCenter.default.post(name: .frameEditModeChanged, object: nil)
+        }
     }
 
     // MARK: - Load from Store
@@ -50,6 +64,7 @@ class FrameManager: GlassFrameViewDelegate {
 
         // Enter edit mode so user can immediately reposition/rename
         isEditing = true
+        NotificationCenter.default.post(name: .frameEditModeChanged, object: nil)
     }
 
     @discardableResult
@@ -58,6 +73,7 @@ class FrameManager: GlassFrameViewDelegate {
 
         let glassView = GlassFrameView(frameGroup: group)
         glassView.delegate = self
+        glassView.isEditMode = isEditing
         glassView.autoresizingMask = [.width, .height]
         window.contentView = glassView
 
@@ -65,13 +81,13 @@ class FrameManager: GlassFrameViewDelegate {
         window.orderFront(nil)
 
         windows[group.id] = window
+        glassViews[group.id] = glassView
         return window
     }
 
     // MARK: - GlassFrameViewDelegate
 
     func glassFrameDidUpdate(_ view: GlassFrameView) {
-        // Sync the window frame with the model
         if let window = windows[view.frameGroup.id] {
             window.applyRect(view.frameGroup.rect.cgRect)
         }
@@ -79,7 +95,6 @@ class FrameManager: GlassFrameViewDelegate {
     }
 
     func glassFrameDidMove(_ view: GlassFrameView, to rect: CGRect) {
-        // The user dragged the entire window — update model
         var group = view.frameGroup
         group.rect = CodableRect(cgRect: rect)
         view.frameGroup = group
@@ -91,5 +106,12 @@ class FrameManager: GlassFrameViewDelegate {
         store.remove(id: id)
         windows[id]?.close()
         windows.removeValue(forKey: id)
+        glassViews.removeValue(forKey: id)
     }
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    static let frameEditModeChanged = Notification.Name("frameEditModeChanged")
 }

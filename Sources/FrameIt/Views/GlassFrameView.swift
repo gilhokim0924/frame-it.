@@ -66,11 +66,21 @@ class GlassFrameView: NSView {
 
     weak var delegate: GlassFrameViewDelegate?
 
+    // Edit mode — shows/hides indicator buttons
+    var isEditMode = false {
+        didSet { updateEditIndicators() }
+    }
+
     // Subviews
     private let effectView = NSVisualEffectView()
     private let tintOverlay = NSView()
     private let titleLabel = NSTextField()
     private let borderLayer = CAShapeLayer()
+
+    // Edit-mode indicator buttons
+    private let deleteButton = NSButton()
+    private let doneButton = NSButton()
+    private let editBorderLayer = CAShapeLayer()
 
     // Interaction state
     private var initialMouseLocation: NSPoint = .zero
@@ -79,6 +89,7 @@ class GlassFrameView: NSView {
 
     private let handleSize: CGFloat = 8
     private let cornerRadius: CGFloat = 14
+    private let buttonSize: CGFloat = 22
 
     // MARK: - Init
 
@@ -86,6 +97,7 @@ class GlassFrameView: NSView {
         self.frameGroup = frameGroup
         super.init(frame: NSRect(origin: .zero, size: frameGroup.rect.cgRect.size))
         setupViews()
+        setupEditButtons()
         applyStyle()
     }
 
@@ -113,10 +125,18 @@ class GlassFrameView: NSView {
         tintOverlay.translatesAutoresizingMaskIntoConstraints = false
         addSubview(tintOverlay)
 
-        // Border
+        // Border (normal mode)
         borderLayer.fillColor = nil
         borderLayer.lineWidth = 1.0
         layer?.addSublayer(borderLayer)
+
+        // Edit border (dashed, only shown in edit mode)
+        editBorderLayer.fillColor = nil
+        editBorderLayer.strokeColor = NSColor.white.withAlphaComponent(0.6).cgColor
+        editBorderLayer.lineWidth = 2.0
+        editBorderLayer.lineDashPattern = [6, 4]
+        editBorderLayer.isHidden = true
+        layer?.addSublayer(editBorderLayer)
 
         // Title label
         titleLabel.isEditable = false
@@ -145,9 +165,66 @@ class GlassFrameView: NSView {
 
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -36),
             titleLabel.heightAnchor.constraint(equalToConstant: 18),
         ])
+    }
+
+    private func setupEditButtons() {
+        // ✕ Delete button — top-left corner
+        configureCircleButton(deleteButton, symbol: "xmark", color: NSColor.systemRed.withAlphaComponent(0.8))
+        deleteButton.action = #selector(deleteAction)
+        deleteButton.target = self
+        deleteButton.translatesAutoresizingMaskIntoConstraints = false
+        deleteButton.isHidden = true
+        addSubview(deleteButton)
+
+        // ✓ Done button — top-right corner
+        configureCircleButton(doneButton, symbol: "checkmark", color: NSColor.systemGreen.withAlphaComponent(0.8))
+        doneButton.action = #selector(doneAction)
+        doneButton.target = self
+        doneButton.translatesAutoresizingMaskIntoConstraints = false
+        doneButton.isHidden = true
+        addSubview(doneButton)
+
+        NSLayoutConstraint.activate([
+            // Delete button — top-left, slightly inset
+            deleteButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -30),
+            deleteButton.widthAnchor.constraint(equalToConstant: buttonSize),
+            deleteButton.heightAnchor.constraint(equalToConstant: buttonSize),
+
+            // Done button — top-right
+            doneButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            doneButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            doneButton.widthAnchor.constraint(equalToConstant: buttonSize),
+            doneButton.heightAnchor.constraint(equalToConstant: buttonSize),
+        ])
+    }
+
+    private func configureCircleButton(_ button: NSButton, symbol: String, color: NSColor) {
+        button.bezelStyle = .circular
+        button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.cornerRadius = buttonSize / 2
+        button.layer?.backgroundColor = color.cgColor
+
+        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+            let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+            button.image = image.withSymbolConfiguration(config)
+            button.contentTintColor = .white
+        } else {
+            button.title = symbol == "xmark" ? "✕" : "✓"
+        }
+    }
+
+    // MARK: - Edit Mode Indicators
+
+    private func updateEditIndicators() {
+        deleteButton.isHidden = !isEditMode
+        doneButton.isHidden = !isEditMode
+        editBorderLayer.isHidden = !isEditMode
+        borderLayer.isHidden = isEditMode
     }
 
     private func applyStyle() {
@@ -165,6 +242,8 @@ class GlassFrameView: NSView {
                           transform: nil)
         borderLayer.path = path
         borderLayer.frame = bounds
+        editBorderLayer.path = path
+        editBorderLayer.frame = bounds
     }
 
     // MARK: - Mouse Handling (moves/resizes the parent WINDOW)
@@ -255,6 +334,11 @@ class GlassFrameView: NSView {
 
     @objc private func deleteAction() {
         delegate?.glassFrameDidRequestDelete(self)
+    }
+
+    @objc private func doneAction() {
+        // Notify to exit edit mode
+        NotificationCenter.default.post(name: .frameDoneEditing, object: nil)
     }
 
     // MARK: - Resize Edge Detection
@@ -356,4 +440,10 @@ protocol GlassFrameViewDelegate: AnyObject {
     func glassFrameDidUpdate(_ view: GlassFrameView)
     func glassFrameDidMove(_ view: GlassFrameView, to rect: CGRect)
     func glassFrameDidRequestDelete(_ view: GlassFrameView)
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    static let frameDoneEditing = Notification.Name("frameDoneEditing")
 }
