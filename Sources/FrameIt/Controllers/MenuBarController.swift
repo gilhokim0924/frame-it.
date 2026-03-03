@@ -6,30 +6,22 @@ import Cocoa
 class MenuBarController: NSObject {
 
     private var statusItem: NSStatusItem!
-    private let overlayWindow: DesktopOverlayWindow
-    private let overlayView: DesktopOverlayView
+    private let frameManager: FrameManager
 
     private var newFrameMenuItem: NSMenuItem!
     private var editMenuItem: NSMenuItem!
     private var lockMenuItem: NSMenuItem!
 
-    init(overlayWindow: DesktopOverlayWindow, overlayView: DesktopOverlayView) {
-        self.overlayWindow = overlayWindow
-        self.overlayView = overlayView
+    init(frameManager: FrameManager) {
+        self.frameManager = frameManager
         super.init()
         setupStatusItem()
-
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(drawingEnded),
-            name: .frameDrawingEnded, object: nil
-        )
     }
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
-            // Use SF Symbol for the icon
             if let image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: "Frame It") {
                 image.isTemplate = true
                 button.image = image
@@ -64,43 +56,22 @@ class MenuBarController: NSObject {
     // MARK: - Actions
 
     @objc private func newFrame() {
-        // Enter draw mode — raise window to floating so it receives clicks
-        overlayView.isEditing = true
-        overlayView.isDrawing = true
-        overlayWindow.enterEditLevel()
-        newFrameMenuItem.state = .on
-
-        // Change cursor to crosshair
-        NSCursor.crosshair.push()
+        frameManager.addNewFrame()
+        editMenuItem.state = .on
+        lockMenuItem.state = .off
     }
 
     @objc private func toggleEdit() {
-        let entering = !overlayView.isEditing
-
-        overlayView.isEditing = entering
-
-        if entering {
-            overlayWindow.enterEditLevel()
-        } else {
-            overlayWindow.enterDesktopLevel()
-        }
-
+        let entering = !frameManager.isEditing
+        frameManager.isEditing = entering
         editMenuItem.state = entering ? .on : .off
         lockMenuItem.state = .off
     }
 
     @objc private func lockFrames() {
-        overlayView.isEditing = false
-        overlayWindow.enterDesktopLevel()
+        frameManager.isEditing = false
         editMenuItem.state = .off
         lockMenuItem.state = .on
-        NSCursor.pop()
-    }
-
-    @objc private func drawingEnded() {
-        newFrameMenuItem.state = .off
-        // Stay in edit mode so user can adjust the frame they just drew
-        NSCursor.pop()
     }
 
     @objc private func quit() {

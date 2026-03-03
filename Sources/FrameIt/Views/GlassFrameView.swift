@@ -55,6 +55,8 @@ struct FrameColors {
 }
 
 // MARK: - GlassFrameView
+// Content view for a FrameWindow. Renders the frosted-glass effect and
+// handles drag-to-move (moves the parent window) and edge-resize.
 
 class GlassFrameView: NSView {
 
@@ -71,9 +73,9 @@ class GlassFrameView: NSView {
     private let borderLayer = CAShapeLayer()
 
     // Interaction state
-    private var dragOrigin: NSPoint?
+    private var initialMouseLocation: NSPoint = .zero
+    private var initialWindowFrame: CGRect = .zero
     private var resizeEdge: ResizeEdge = .none
-    private var initialFrame: CGRect = .zero
 
     private let handleSize: CGFloat = 8
     private let cornerRadius: CGFloat = 14
@@ -82,7 +84,7 @@ class GlassFrameView: NSView {
 
     init(frameGroup: FrameGroup) {
         self.frameGroup = frameGroup
-        super.init(frame: frameGroup.rect.cgRect)
+        super.init(frame: NSRect(origin: .zero, size: frameGroup.rect.cgRect.size))
         setupViews()
         applyStyle()
     }
@@ -165,7 +167,7 @@ class GlassFrameView: NSView {
         borderLayer.frame = bounds
     }
 
-    // MARK: - Mouse Handling
+    // MARK: - Mouse Handling (moves/resizes the parent WINDOW)
 
     override func mouseDown(with event: NSEvent) {
         // Double-click to rename
@@ -174,42 +176,40 @@ class GlassFrameView: NSView {
             return
         }
 
-        guard let superview = superview else { return }
-        let loc = superview.convert(event.locationInWindow, from: nil)
-        initialFrame = frame
+        guard let window = window else { return }
+        initialMouseLocation = NSEvent.mouseLocation
+        initialWindowFrame = window.frame
         resizeEdge = detectEdge(at: convert(event.locationInWindow, from: nil))
-
-        if resizeEdge == .none {
-            dragOrigin = loc
-        }
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let superview = superview else { return }
-        let loc = superview.convert(event.locationInWindow, from: nil)
+        guard let window = window else { return }
+        let currentMouse = NSEvent.mouseLocation
+        let dx = currentMouse.x - initialMouseLocation.x
+        let dy = currentMouse.y - initialMouseLocation.y
 
         if resizeEdge != .none {
-            applyResize(to: loc)
-        } else if let origin = dragOrigin {
-            let dx = loc.x - origin.x
-            let dy = loc.y - origin.y
-            frame = CGRect(
-                x: initialFrame.origin.x + dx,
-                y: initialFrame.origin.y + dy,
-                width: initialFrame.width,
-                height: initialFrame.height
-            )
+            let newFrame = computeResize(dx: dx, dy: dy)
+            window.setFrame(newFrame, display: true)
+        } else {
+            // Move the window
+            var newOrigin = initialWindowFrame.origin
+            newOrigin.x += dx
+            newOrigin.y += dy
+            window.setFrameOrigin(newOrigin)
         }
     }
 
     override func mouseUp(with event: NSEvent) {
-        dragOrigin = nil
         resizeEdge = .none
+        guard let window = window else { return }
 
-        // Persist the new rect
-        frameGroup.rect = CodableRect(cgRect: frame)
-        delegate?.glassFrameDidUpdate(self)
+        // Persist the new window position/size
+        let rect = window.frame
+        delegate?.glassFrameDidMove(self, to: rect)
     }
+
+    // MARK: - Context Menu
 
     override func rightMouseDown(with event: NSEvent) {
         let menu = NSMenu()
@@ -241,7 +241,6 @@ class GlassFrameView: NSView {
     }
 
     @objc private func renameAction() {
-        // Make the title label editable temporarily
         titleLabel.isEditable = true
         titleLabel.isSelectable = true
         titleLabel.becomeFirstResponder()
@@ -284,48 +283,42 @@ class GlassFrameView: NSView {
         return .none
     }
 
-    private func applyResize(to point: NSPoint) {
-        var newFrame = initialFrame
+    private func computeResize(dx: CGFloat, dy: CGFloat) -> CGRect {
+        var r = initialWindowFrame
         let minSize: CGFloat = 80
 
         switch resizeEdge {
         case .right:
-            newFrame.size.width = max(minSize, point.x - initialFrame.origin.x)
+            r.size.width = max(minSize, initialWindowFrame.width + dx)
         case .left:
-            let dx = point.x - initialFrame.origin.x
-            newFrame.origin.x = initialFrame.origin.x + dx
-            newFrame.size.width = max(minSize, initialFrame.width - dx)
+            r.origin.x = initialWindowFrame.origin.x + dx
+            r.size.width = max(minSize, initialWindowFrame.width - dx)
         case .top:
-            newFrame.size.height = max(minSize, point.y - initialFrame.origin.y)
+            r.size.height = max(minSize, initialWindowFrame.height + dy)
         case .bottom:
-            let dy = point.y - initialFrame.origin.y
-            newFrame.origin.y = initialFrame.origin.y + dy
-            newFrame.size.height = max(minSize, initialFrame.height - dy)
+            r.origin.y = initialWindowFrame.origin.y + dy
+            r.size.height = max(minSize, initialWindowFrame.height - dy)
         case .topRight:
-            newFrame.size.width = max(minSize, point.x - initialFrame.origin.x)
-            newFrame.size.height = max(minSize, point.y - initialFrame.origin.y)
+            r.size.width = max(minSize, initialWindowFrame.width + dx)
+            r.size.height = max(minSize, initialWindowFrame.height + dy)
         case .topLeft:
-            let dx = point.x - initialFrame.origin.x
-            newFrame.origin.x = initialFrame.origin.x + dx
-            newFrame.size.width = max(minSize, initialFrame.width - dx)
-            newFrame.size.height = max(minSize, point.y - initialFrame.origin.y)
+            r.origin.x = initialWindowFrame.origin.x + dx
+            r.size.width = max(minSize, initialWindowFrame.width - dx)
+            r.size.height = max(minSize, initialWindowFrame.height + dy)
         case .bottomRight:
-            let dy = point.y - initialFrame.origin.y
-            newFrame.size.width = max(minSize, point.x - initialFrame.origin.x)
-            newFrame.origin.y = initialFrame.origin.y + dy
-            newFrame.size.height = max(minSize, initialFrame.height - dy)
+            r.size.width = max(minSize, initialWindowFrame.width + dx)
+            r.origin.y = initialWindowFrame.origin.y + dy
+            r.size.height = max(minSize, initialWindowFrame.height - dy)
         case .bottomLeft:
-            let dx = point.x - initialFrame.origin.x
-            let dy = point.y - initialFrame.origin.y
-            newFrame.origin.x = initialFrame.origin.x + dx
-            newFrame.size.width = max(minSize, initialFrame.width - dx)
-            newFrame.origin.y = initialFrame.origin.y + dy
-            newFrame.size.height = max(minSize, initialFrame.height - dy)
+            r.origin.x = initialWindowFrame.origin.x + dx
+            r.size.width = max(minSize, initialWindowFrame.width - dx)
+            r.origin.y = initialWindowFrame.origin.y + dy
+            r.size.height = max(minSize, initialWindowFrame.height - dy)
         case .none:
             break
         }
 
-        frame = newFrame
+        return r
     }
 
     // MARK: - Cursor
@@ -361,5 +354,6 @@ extension GlassFrameView: NSTextFieldDelegate {
 
 protocol GlassFrameViewDelegate: AnyObject {
     func glassFrameDidUpdate(_ view: GlassFrameView)
+    func glassFrameDidMove(_ view: GlassFrameView, to rect: CGRect)
     func glassFrameDidRequestDelete(_ view: GlassFrameView)
 }
