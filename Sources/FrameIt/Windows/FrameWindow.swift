@@ -12,10 +12,9 @@ class FrameWindow: NSPanel {
     private static let desktopLevel = NSWindow.Level(
         rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1
     )
-    /// Edit level — same as desktop icons so frames can receive events
-    /// without covering other app windows
+    /// Edit level — just above desktop icons so we can interact
     private static let editLevel = NSWindow.Level(
-        rawValue: Int(CGWindowLevelForKey(.desktopIconWindow))
+        rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1
     )
 
     var isEditMode = false {
@@ -53,6 +52,9 @@ class FrameWindow: NSPanel {
         // Floating panel settings
         isFloatingPanel = true
         becomesKeyOnlyIfNeeded = true
+
+        // Accept mouse events without requiring app activation first
+        acceptsMouseMovedEvents = true
     }
 
     override var canBecomeKey: Bool { isEditMode }
@@ -64,9 +66,11 @@ class FrameWindow: NSPanel {
         if isEditMode {
             level = Self.editLevel
             ignoresMouseEvents = false
+            makeKeyAndOrderFront(nil)
         } else {
             level = Self.desktopLevel
             ignoresMouseEvents = true
+            orderFront(nil)
         }
     }
 
@@ -74,5 +78,14 @@ class FrameWindow: NSPanel {
 
     func applyRect(_ rect: CGRect) {
         setFrame(rect, display: true)
+    }
+}
+
+// MARK: - FirstMouseView
+// An NSView that accepts the first mouse click without requiring app activation.
+
+class FirstMouseView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
     }
 }
